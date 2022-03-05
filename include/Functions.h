@@ -190,8 +190,10 @@ void arm_initialization(RigidBody<double> &l1, RigidBody<double> & l2, Joint_ & 
 void expr_initialization(RigidBody<double> &l1, RigidBody<double> & l2, ExprConfig & config) {
 
 	config.control = POSITION_CONTROL;
+	//height of lowest point on knife for initial position and orientation
 	config.init_height = 0.050 + 0.002;   //with protector  - 0.003 for knife cutting 
 
+	//lowest point on the knife edge int x-dir in knife frame
 	config.u0 = 0.0;
 	config.desired_u0 = config.u0;
 
@@ -205,40 +207,49 @@ void expr_initialization(RigidBody<double> &l1, RigidBody<double> & l2, ExprConf
 	config.r_wr[0] = 0.6226 - 0.06539;		   //the moving cutting board
 	config.r_wr[1] = 0.3930 - 0.003; 
 
+	//offset from knife tip to the end of the first link
 	config.sx = -l2.end_point.x() + config.r_ek.x();
 	config.sy =  l2.end_point.y() - config.r_ek.y();
 
+	//reference point for the object contour fitting in vision in world frame
 	config.p_obj[0] = 0.0;
 	config.p_obj[1] = 0.0;
 
-	config.u1 = 0.08;
+	config.u1 = 0.08; // contact points in knife frame on the knife edge
 	config.u2 = 0.13;
 	config.r1 = 0.00;
 	config.r2 = 0.05;
-	config.lvx = 0.0;
+	config.lvx = 0.0; // x-dir velocity for the lowest point in WF
 	config.lvy = 0.0;
-	config.avx = 0.0; 
+	config.avx = 0.0; // a is the center of the end of just the second link
 	config.avy = 0.0; 
 
+	// not changed
 	config.ypcg.Kp = 450;
 	config.ypcg.Ki = 55;
 	config.ypcg.Kd = 12;
 
+	// initialized here, ypcg : y position control, desired acc and vel of the control point
 	config.ypcg.acc = 0.0;
 	config.ypcg.vel = 0.0;
 	config.ypcg.int_pos_error = 0.0; 
 
+	// fcg : force control
 	config.fcg.Kfp = 0.00;
 	config.fcg.Kfi = 2.00;
 	config.fcg.Kfd = 0.0000020;
+	// only for the slicing phase, desired force between knife and cutting board
 	config.fcg.fd = 5;
+	// force error and integral
 	config.fcg.fe = 0;
 	config.fcg.int_fe = 0;
 
+	// x-dir position control, never used
 	config.xpcg.Kp = 800;
 	config.xpcg.Ki = 1600;
 	config.xpcg.Kd = 30;
 
+	// desired values
 	config.xpcg.pos = 0.0;
 	config.xpcg.vel = 0.0;
 	config.xpcg.acc = 0.0;
@@ -246,33 +257,43 @@ void expr_initialization(RigidBody<double> &l1, RigidBody<double> & l2, ExprConf
 	config.xpcg.int_pos_error = 0.0; 
 
 
+	// tricky var needed during intial knife-board contact
 	config.fy_min = 100.0;
 	config.contact_board = false;
 
+	//wrt knife frame
 	config.lower_coeff  = { 74 ,  -36.15 ,  7.089 ,-0.744 , 0.0 };
 	config.upper_coeff  = { -37.23, 19.7,   -3.82,  0.3265,   0.0 };
 	config.object_coeff = { -66.67, 4.0, 0.0 };
+	// area of object in the cutting plane
 	config.totalArea = 0.0; 
+	// x-pos of object contour intersection with cutting board
 	config.leftcp    = 0.0;
 	config.rightcp   = 0.0;
 
 	Polynomial blade(config.lower_coeff); 
+	// constant orientation determined by the lowest point during pressing
 	config.apcg.const_angle = M_PI - atan(blade.derivative().evaluate(config.u0));
+	// th2 = const_ang - th1
 
+	//
 	config.init_height = 0.0; 
 	config.init_th1_high = planning(config, l1); 
 
 	config.init_height = 0.05;
 	config.init_th1_low = planning(config, l1);
 
+	// used in vision, related to rightCp but little bit larger
 	config.lx_max = 0.09; 
 
+	// object parameter fitting
 	config.fitting_start_index = 0; 
 	config.fitting_end_index = 0; 
 
 	return;
 }
 
+// intial position of knife just touching the object
 double cal_initialpos(ExprConfig & config, std::vector<Eigen::Vector2d> points) {
 	static const Polynomial knife_lower_curve(config.lower_coeff);
 
