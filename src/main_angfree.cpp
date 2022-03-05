@@ -139,7 +139,7 @@
 // 	ret = kinect.get_capture();
 
 // 	for (int round = 0; round < rounds; round++) {
-// 		ExprConfig config = {};
+// 		ExprConfig config = {}; //
 // 		expr_initialization(l1, l2, config);
 
 // 		// set parameters: initial position and orientation, and the desired constant velocities
@@ -147,14 +147,13 @@
 // 		double ang = 0*M_PI / 180; 	   // initial orentation
 // 		double vel_y = -0.01; 	//desired y direction velocity
 // 		double vel_x = -0.00;
-// 		double vel_a = -0.03 * M_PI;
 // 		double ang_d = ang;
 // 		config.board_vel = -0.0; 	    // depends on which board you use, 0 for stationary board, negtive for moving board
 
 // 		// initialize the knife's position with given knife tip's y position and knife's orientation
-// 		double c12 = cos(ang + M_PI);
+// 		double c12 = cos(ang + M_PI); //cos(th1+th2)
 // 		double s12 = sin(ang + M_PI);
-// 		double c1a = (y0 - config.sy * c12 - config.sx * s12 - config.r_wr.y()) / l1.length;
+// 		double c1a = (y0 - config.sy * c12 - config.sx * s12 - config.r_wr.y()) / l1.length; // cos(th1 + alpha), a is alpha
 // 		double s1a = sqrt(1 - c1a * c1a);
 // 		j1.theta = asin(s1a) - l1.angle;
 // 		j2.theta = ang + M_PI - j1.theta;
@@ -178,6 +177,7 @@
 
 // 		// bias the F/T sensor for once	for repeat cuttings
 // 		if (round == 0) {
+//      // orients the sensor to be parallel to the board for biasing
 // 			ret = wam_arm.move(0.0, j1.theta, 0.0, M_PI - j1.theta, true, 0.5, 2.0); if (ret == -1) tear_down();
 // 			std::this_thread::sleep_for(std::chrono::seconds(1));
 
@@ -206,11 +206,12 @@
 // 		data_t* runtime_data = new data_t[cycles];
 // 		memset(theta_dot_history, 0, sizeof(double) * 10 * 2);
 // 		memset(torque_history, 0, sizeof(double) * FILTER_WINDOW * 2);
+//    //used for filter which filters the joint velocity (smooth them)
 // 		static int history_index = 0;
 // 		memset(theta_dot_history_2, 0, sizeof(double) * WIN_SIZE * 2);
 
-// 		int index_hybrid_ctrl_start = cycles;
-// 		double max_fy = -100.0;
+// 		int index_hybrid_ctrl_start = cycles;  //variable to determine when slicing phase starts
+// 		double max_fy = -100.0;                //used to determine when to start paramenter fitting of the object
 // 		double min_fy = 100;
 // 		int max_fy_index = 0;
 // 		int min_fy_index = 0;
@@ -416,7 +417,6 @@
 // 			{
 // 				config.ypcg.vel = vel_y;
 // 				config.ypcg.pos += config.ypcg.vel * dt;
-// 				ang_d = ang_d + vel_a * dt;
 
 // 				config.xpcg.vel = vel_x;
 // 				config.xpcg.pos += config.xpcg.vel * dt - config.board_vel * dt;
@@ -456,7 +456,7 @@
 // 				double vye = config.ypcg.vel - vyr;
 // 				config.ypcg.int_pos_error += pye * dt;
 
-// 				const Eigen::Vector3d gain_x = { 800.0, 1000.0 ,  35.0 };
+// 				const Eigen::Vector3d gain_x = { 800.0, 1000.0 ,  35.0 }; // Kp, KI, KD
 // 				const Eigen::Vector3d err_x = { pxe,   config.xpcg.int_pos_error, vxe };
 // 				const Eigen::Vector3d gain_y = { 800.0, 1000.0 ,  35.0 };
 // 				const Eigen::Vector3d err_y = { pye,   config.ypcg.int_pos_error, vye };
