@@ -178,22 +178,21 @@ int main(int argc, char* argv[])
 		memset(theta_dot_history, 0, sizeof(double) * 10 * 2);
 		memset(torque_history, 0, sizeof(double) * FILTER_WINDOW * 2);
 
-		int index_force_ctrl_start = cycles;
-		int index_hybrid_ctrl_start = cycles;
+		int index_force_ctrl_start = cycles; //touching phase starts
+		int index_hybrid_ctrl_start = cycles; // slicing phase starts
 		double max_fy = 0.0;
-		double initial_px = 0.0;
+		double initial_px = 0.0;	// slcing phase to record where the contact point is when the slicing phase starts
 		bool contourFitted = false;
 		bool parametersFitted = false;
 
 		Eigen::Vector4d pos, vel, tau;
 		auto start = std::chrono::system_clock::now();
 
-		Devector devec;
 		bool exitloops = false;
 		int i = 0;
 
-		//ret = wam_arm.start_torque_control();				                         if (ret == -1) tear_down();
-		ret = wam_arm.start_position_control();				                         if (ret == -1) tear_down();
+		ret = wam_arm.start_torque_control();				                         if (ret == -1) tear_down();
+		//ret = wam_arm.start_position_control();				                         if (ret == -1) tear_down();
 
 		std::this_thread::sleep_for(std::chrono::seconds(4));
 		// std::string msg = "s*";
@@ -232,6 +231,8 @@ int main(int argc, char* argv[])
 			j1.theta_dot = filtered_theta_dot[0];
 			j2.theta_dot = filtered_theta_dot[1];
 
+			//dynamic part
+			//cos(th2 + alpha+beta)
 			double c2ab = cos(j2.theta - j1.alpha + l2.mc_angle);
 			double s2ab = sin(j2.theta - j1.alpha + l2.mc_angle);
 
@@ -256,6 +257,7 @@ int main(int argc, char* argv[])
 			c1a = cos(j1.theta + l1.angle);
 			s1a = sin(j1.theta + l1.angle);
 
+			// refers to Jacobian at center of end of second link
 			Eigen::Matrix<double, 3, 2> J;
 			J.row(0) = Eigen::Vector2d(-l2.end_point.y() * c12 - 0.045 * s12 - l1.length * c1a, -l2.end_point.y() * c12 - 0.045 * s12);
 			J.row(1) = Eigen::Vector2d(-l2.end_point.y() * s12 + 0.045 * c12 - l1.length * s1a, -l2.end_point.y() * s12 + 0.045 * c12);
@@ -275,8 +277,9 @@ int main(int argc, char* argv[])
 			Rws << 0, -c12, s12, 1, 0, 0, 0, s12, c12;
 			Vec3 Fs = { ft.fx, ft.fy, ft.fz }, Ts = { ft.tx, ft.ty, ft.tz };
 			Vec3 Fw, Tw;
+			// converts sensor reading from sensor frame back to world frame
 			sensorCompensation(Rws, Fs, Ts, Fw, Tw);
-			const Vec3 omega = Eigen::Vector3d(-Fw[0], Fw[2], Tw[1]);
+			const Vec3 omega = Eigen::Vector3d(-Fw[0], Fw[2], Tw[1]); // force in x and y direction and torque in z-dir
 			if (omega[1] > 100)
 				break;
 
@@ -285,20 +288,25 @@ int main(int argc, char* argv[])
 
 			if (config.u0 < 0.0) config.u0 = 0.0;
 
+			// y-position of lowest point in the knife frame 
 			double bu0 = blade.evaluate(config.u0);
+			// position of lowest point in the world frame
 			config.lx = -(config.sy - bu0) * s12 + (config.sx - config.u0) * c12 - l1.length * s1a + config.r_wr.x();
 			config.ly = (config.sy - bu0) * c12 + (config.sx - config.u0) * s12 + l1.length * c1a + config.r_wr.y();
+			// position of a in world frame
 			config.ax = -l2.end_point.y() * s12 + 0.045 * c12 - l1.length * s1a + config.r_wr.x();
 			config.ay = l2.end_point.y() * c12 + 0.045 * s12 + l1.length * c1a + config.r_wr.y();
 
+			//position of the knife tip in the world frame
 			config.px = -config.sy * s12 + config.sx * c12 - l1.length * s1a + config.r_wr.x();
 			config.py = config.sy * c12 + config.sx * s12 + l1.length * c1a + config.r_wr.y();
+			// y-dir vel of lowest point
 			double lp_vely = (-l1.length * s1a) * j1.theta_dot + (-(config.sy - bu0) * s12 + (config.sx - config.u0) * c12) * (j1.theta_dot + j2.theta_dot);
 
 			//std::cout << "lp_y: " << config.ly << ", u0:  " << config.u0 << std::endl; 
 			// Initialize position control desired values 
 			if (i == 0) {
-				config.ypcg.pos = config.py;
+				config.ypcg.pos = config.py; // desired pos = current value for knife tip
 				config.xpcg.pos = config.px;
 
 				config.desired_th1 = j1.theta;
@@ -306,15 +314,18 @@ int main(int argc, char* argv[])
 			}
 
 			//desired vel -0.08 acc 0.32
-			const double vy_max = -0.04;
-			const double acc_desired = 0.16;   // original value 0.16
+			const double acc_desired = 0.0;   // original value 0.16
+			// height of the contact board, world frame on cutting board => 0.0
 			const double y_contact_plane = 0.000;
+			//
 			double offset_ly = 0;
 
 			if (config.control == POSITION_CONTROL) {
+				// if very close to cutting board
 				if (config.ly < y_contact_plane + 0.004) {
 					break;
 				}
+				// switch to touching phase
 				if (config.ly + offset_ly < y_contact_plane + 0.001 || config.ly < 0.001) {
 					config.fy_min = std::min(config.fy_min, omega[1]);
 					if (omega[1] - config.fy_min > 5.0 && !config.contact_board /*&& abs(config.lvy) < 0.005*/) {
@@ -341,11 +352,11 @@ int main(int argc, char* argv[])
 			switch (config.control) {
 			case POSITION_CONTROL:
 			{
-				config.ypcg.vel = vel_y;
-				config.ypcg.pos += config.ypcg.vel * dt;
-				ang_d = ang_d + vel_a * dt;
+				config.ypcg.vel = vel_y;	//desired vel
+				config.ypcg.pos += config.ypcg.vel * dt; //desired position
+				//ang_d = ang_d + vel_a * dt;
 
-				config.xpcg.vel = vel_x;
+				config.xpcg.vel = vel_x;	//desired vel
 				config.xpcg.pos += config.xpcg.vel * dt;
 
 				/*const double c12_d = cos(ang_d + M_PI);
@@ -363,10 +374,12 @@ int main(int argc, char* argv[])
 				const double desired_ax = (config.sy * s12_d - config.sx * c12_d) * vel_a*vel_a + l1.length * s1a_d * pow(desired_th1_dot, 2) - l1.length * c1a_d * desired_th1_ddot;*/
 
 
+				/*
 				const double c12_d = cos(config.desired_th1 + config.desired_th2);
 				const double s12_d = sin(config.desired_th1 + config.desired_th2);
 				const double c1a_d = cos(config.desired_th1 + l1.angle);
 				const double s1a_d = sin(config.desired_th1 + l1.angle);
+				
 
 				const double desired_px = 0;
 				const double desired_vx = vel_x;
@@ -385,13 +398,16 @@ int main(int argc, char* argv[])
 					config.desired_th1 += theta_dot[0] * dt;
 					config.desired_th2 += theta_dot[1] * dt;
 				}
+				*/
 
 
+				// velocity for the knife tip
 				double vxr = (-config.sy * c12 - config.sx * s12) * (j1.theta_dot + j2.theta_dot) - l1.length * c1a * j1.theta_dot;
 				double vyr = (-config.sy * s12 + config.sx * c12) * (j1.theta_dot + j2.theta_dot) - l1.length * s1a * j1.theta_dot;
 				config.lvx = vxr;
 				config.lvy = vyr;
 
+				// Jacobian at the knife tip
 				Eigen::Matrix2d Jp;
 				Jp.row(0) = Eigen::Vector2d(-config.sy * c12 - config.sx * s12 - l1.length * c1a, -config.sy * c12 - config.sx * s12);
 				Jp.row(1) = Eigen::Vector2d(-config.sy * s12 + config.sx * c12 - l1.length * s1a, -config.sy * s12 + config.sx * c12);
@@ -446,7 +462,7 @@ int main(int argc, char* argv[])
 
 			if (exit_this_loop)	break;
 
-			// store history velocity data
+			// store history torque data
 			for (size_t j = 0; j < FILTER_WINDOW - 1; j++)
 			{
 				torque_history[j][0] = torque_history[j + 1][0];
@@ -461,6 +477,7 @@ int main(int argc, char* argv[])
 			filtered_torque[0] = velocity_filter(torque_history, FILTER_WINDOW, 0, sigma_torque_filter, j1.torque);
 			filtered_torque[1] = velocity_filter(torque_history, FILTER_WINDOW, 1, sigma_torque_filter, j2.torque);
 
+			// position control to keep other two joints fixed
 			Eigen::Vector4d torque;
 			torque[0] = (0 - pos[0]) * 10;
 			torque[2] = (0 - pos[2]) * 50;
@@ -479,8 +496,9 @@ int main(int argc, char* argv[])
 
 			runtime_data[i].rd_torque = Eigen::Vector4d(0, filtered_torque[0], 0, filtered_torque[1]);
 
-			//ret = wam_arm.set_torque(torque);            if (ret == -1) tear_down();
+			ret = wam_arm.set_torque(torque);            if (ret == -1) tear_down();
 
+			/*
 			Eigen::Vector4d pos_comd;
 			pos_comd[0] = 0.0;
 			pos_comd[2] = 0.0;
@@ -489,6 +507,7 @@ int main(int argc, char* argv[])
 			pos_comd[3] = config.desired_th2;
 
 			ret = wam_arm.set_position(pos_comd);            if (ret == -1) tear_down();
+			*/
 
 
 			double time_to_wait;
@@ -502,8 +521,8 @@ int main(int argc, char* argv[])
 		}
 		cycles = i;
 
-		//ret = wam_arm.end_torque_control();				 if (ret == -1) tear_down();
-		ret = wam_arm.end_position_control();				 if (ret == -1) tear_down();
+		ret = wam_arm.end_torque_control();				 if (ret == -1) tear_down();
+		//ret = wam_arm.end_position_control();				 if (ret == -1) tear_down();
 		ret = wam_arm.move(0.0, 0.4, 0.0, 2.7, true, 0.2, 1.0); if (ret == -1) tear_down();
 
 		// let the linear guide move back 
